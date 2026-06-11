@@ -9,7 +9,7 @@ name = "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
 
 [wandb]
 project = "reverse-text-codistill"
-name = "codistill-reverse-text"
+name = "codistill-reverse-text-30stage"
 
 [orchestrator]
 batch_size = 128
@@ -24,9 +24,12 @@ id = "reverse-text"
 args = { v1 = true }
 
 [trainer]
-rl_steps = 0   # start with pure clone -> RFT -> OPD; set to 1 to add a GRPO step
+rl_steps = 1   # GRPO step on the student each stage, then clone -> RFT -> OPD
 rft_steps = 1
 opd_steps = 2
+# reverse-text reward is difflib char-similarity in [0,1] (never exactly 1.0);
+# 0.8 == "mostly-correct reversal, right format" (~9% of samples, grows as the student improves).
+correct_reward_threshold = 0.8
 
 [trainer.optim]  # student
 lr = 3e-6
