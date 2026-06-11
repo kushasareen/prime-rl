@@ -25,8 +25,8 @@ args = { v1 = true }
 
 [trainer]
 rl_steps = 1   # GRPO step on the student each stage, then clone -> RFT -> OPD
-rft_steps = 1
-opd_steps = 2
+rft_steps = 4
+opd_steps = 1
 # reverse-text reward is difflib char-similarity in [0,1] (never exactly 1.0);
 # 0.8 == "mostly-correct reversal, right format" (~9% of samples, grows as the student improves).
 correct_reward_threshold = 0.8
