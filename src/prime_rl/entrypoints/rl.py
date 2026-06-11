@@ -67,7 +67,7 @@ def write_subconfigs(config: RLConfig, output_dir: Path) -> None:
             tomli_w.dump(config.inference.model_dump(exclude=exclude_inference, exclude_none=True, mode="json"), f)
 
 
-def rl_local(config: RLConfig):
+def rl_local(config: RLConfig, trainer_module: str = "prime_rl.trainer.rl.train"):
     assert config.deployment.type == "single_node"
 
     logger = setup_logger(
@@ -239,7 +239,7 @@ def rl_local(config: RLConfig):
             "--tee=3",
             f"--nproc-per-node={len(trainer_gpu_ids)}",
             "-m",
-            "prime_rl.trainer.rl.train",
+            trainer_module,
             "@",
             (config_dir / TRAINER_TOML).as_posix(),
         ]
@@ -472,7 +472,7 @@ def rl_slurm(config: RLConfig):
     logger.success(f"{result.stdout.strip()}\n\n{log_message}")
 
 
-def rl(config: RLConfig):
+def rl(config: RLConfig, trainer_module: str = "prime_rl.trainer.rl.train"):
     resuming = config.ckpt is not None and config.ckpt.resume_step is not None
     clean = config.clean_output_dir and not os.environ.get("NEVER_CLEAN_OUTPUT_DIR")
     ckpt_output_dir = config.ckpt.output_dir if config.ckpt else None
@@ -507,7 +507,7 @@ def rl(config: RLConfig):
     if config.slurm is not None:
         rl_slurm(config)
     else:
-        rl_local(config)
+        rl_local(config, trainer_module=trainer_module)
 
 
 def main():

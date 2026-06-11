@@ -44,6 +44,7 @@ dependencies = [
 
 [project.scripts]
 rl = "prime_rl.entrypoints.rl:main"
+codistill = "prime_rl.entrypoints.codistill:main"
 sft = "prime_rl.entrypoints.sft:main"
 inference = "prime_rl.entrypoints.inference:main"
 trainer = "prime_rl.entrypoints.trainer:main"

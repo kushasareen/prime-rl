@@ -1,0 +1,41 @@
+# Staged student/teacher co-distillation on reverse-text (Qwen3-0.6B).
+# Each stage: (rl_steps) GRPO on student -> clone into teacher -> (rft_steps) SFT
+# teacher on the student's correct generations -> (opd_steps) distil student from teacher.
+max_steps = 30  # number of stages
+seq_len = 2048
+
+[model]
+name = "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
+
+[wandb]
+project = "reverse-text-codistill"
+name = "codistill-reverse-text"
+
+[orchestrator]
+batch_size = 128
+group_size = 16
+max_off_policy_steps = 0  # near-lockstep: each stage's rollouts are on-policy w.r.t. the stage-start student
+
+[orchestrator.train.sampling]
+max_completion_tokens = 128
+
+[[orchestrator.train.env]]
+id = "reverse-text"
+args = { v1 = true }
+
+[trainer]
+rl_steps = 0   # start with pure clone -> RFT -> OPD; set to 1 to add a GRPO step
+rft_steps = 1
+opd_steps = 2
+
+[trainer.optim]  # student
+lr = 3e-6
+
+[trainer.teacher_optim]
+type = "adamw"
+lr = 1e-5
+
+[inference]
+
+[orchestrator.renderer]
+name = "default"
