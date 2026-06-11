@@ -181,6 +181,13 @@ def train(config: CoDistillTrainerConfig):
 
         progress.step += 1
 
+    # Broadcast the final student so the orchestrator can advance to the terminal
+    # policy version, assemble its draining batch (step >= max_steps), and tear down
+    # cleanly. The rl trainer broadcasts at the top of the terminal step before
+    # breaking; our while-condition skips that iteration, so we do it explicitly here.
+    if weight_broadcast is not None and config.max_steps is not None:
+        weight_broadcast.broadcast_weights(student, step=progress.step)
+
     logger.success("Co-distillation trainer finished!")
 
 
