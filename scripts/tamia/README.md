@@ -16,10 +16,13 @@ Hardware: GPU nodes are `h100:4` (48 CPU / 500G RAM / 4×H100-80G) and
    nearly free). `scripts/tamia/env.sh` sets all of this. The repo itself stays in
    `$HOME` (it's only ~500 files).
 
-2. **Compute nodes have NO internet.** Everything that downloads must run on the
-   **login node**: installing the venv, and pre-downloading model weights. Inside a
-   job, `env.sh` sets `WANDB_MODE=offline` and `HF_HUB_OFFLINE=1` so runs don't hang
-   on dead network calls. You `wandb sync` afterwards from the login node.
+2. **Compute nodes reach the internet only via a proxy.** No direct route, but the
+   `httpproxy/1.0` module exposes a Squid proxy (`squid.tamia.ecpia.ca:3128`). Inside
+   a job `env.sh` sets `http(s)_proxy` to it, so **wandb logs online** (live dashboard)
+   and **HF auto-fetches** any missing files. Pre-downloading big models/datasets on
+   the login node is still recommended — pulling multi-GB weights through the proxy
+   mid-job wastes walltime. `env.sh` still pins `UV_NO_SYNC=1` (never sync at runtime).
+   If the proxy is ever down, fall back with `WANDB_MODE=offline HF_HUB_OFFLINE=1 sbatch ...`.
 
 > `$SCRATCH` is purged after 60 days of no access. The venv is fully regenerable
 > (`uv sync`); model weights you want to keep long-term belong in `/project`.
@@ -51,6 +54,11 @@ Add `source ~/path/to/prime-rl/scripts/tamia/env.sh` (or just the `export`s) to 
 Compute nodes can't reach HuggingFace. Fetch BOTH the model weights and every
 dataset the env loads, into the scratch HF cache, before submitting. A missing one
 fails inside the job with `Couldn't reach '<repo>' on the Hub (OfflineModeIsEnabled)`.
+
+> **Always run `hf download` — do NOT just `ls` the cache dir.** A model dir can
+> exist with only the tokenizer files cached (from prior tokenizer-only use) and no
+> weights; `ls` "sees" it but vLLM then dies offline with `LocalEntryNotFoundError`.
+> `hf download` is idempotent — it no-ops if complete, fetches what's missing otherwise.
 
 ```bash
 source scripts/tamia/env.sh
@@ -92,14 +100,11 @@ source scripts/tamia/env.sh
 uv run rl @ configs/debug/reverse_text_v1.toml --deployment.num-infer-gpus 3 --deployment.num-train-gpus 1
 ```
 
-## Sync wandb after a run (login node)
+## wandb
 
-Jobs log offline to `$SCRATCH/wandb`. Push them once back on the login node:
-
-```bash
-source scripts/tamia/env.sh
-wandb sync $SCRATCH/wandb/offline-run-*
-```
+Jobs log **online** through the proxy — watch them live on the dashboard (project set in
+the config). No manual sync needed. If you ran with `WANDB_MODE=offline` (proxy down),
+push afterwards from the login node: `wandb sync $SCRATCH/wandb/offline-run-*`.
 
 ## Troubleshooting
 
@@ -112,6 +117,9 @@ wandb sync $SCRATCH/wandb/offline-run-*
 - **Job hangs reaching huggingface.co / api.wandb.ai** — you're online-mode on a
   compute node. Confirm `env.sh` was sourced (`echo $WANDB_MODE` should print
   `offline` inside a job) and that the model was pre-downloaded on the login node.
+- **`LocalEntryNotFoundError` / `couldn't connect to huggingface.co` during inference
+  startup** — the model is only *partially* cached (e.g. tokenizer files but no
+  weights). Run `uv run hf download <model>` on the login node; don't trust an `ls`.
 - **`ConnectionError: Couldn't reach '<repo>' on the Hub (OfflineModeIsEnabled)`** —
   a model or dataset wasn't pre-cached. For a dataset, note that `hf download
   --repo-type dataset` is NOT enough: run `load_dataset(...)` once online to build

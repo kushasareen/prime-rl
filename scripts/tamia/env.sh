@@ -48,20 +48,20 @@ export WANDB_DIR="${WANDB_DIR:-${SCRATCH}/wandb}"
 export WANDB_ENTITY="${WANDB_ENTITY:-kusha_sareen}"
 mkdir -p "$WANDB_DIR"
 
-# --- inside a SLURM job, compute nodes have NO internet: force everything offline ---
-# Only export these when actually in a job. On the login node we leave them UNSET
-# (not empty!) — an empty UV_NO_SYNC makes uv error ("expected a boolish value"),
-# and login-node work needs online wandb/HF/uv-sync anyway. Override by exporting
-# before sbatch (e.g. WANDB_MODE=online for an online-capable node).
+# --- inside a SLURM job: reach the internet via Tamia's Squid proxy ---
+# Compute nodes have no direct internet, but the `httpproxy/1.0` module exposes a Squid
+# proxy. With it, wandb logs ONLINE (live dashboard, no offline-sync dance) and HF
+# auto-fetches any missing files (self-healing if a model/dataset wasn't fully cached).
+# We still pin UV_NO_SYNC — the venv is pre-built on the login node and `uv run`'s default
+# sync would needlessly hit the network (incl. the aarch64 vllm metadata that errors).
+# Pre-downloading big models/datasets on the login node is still faster than pulling them
+# through the proxy mid-job — see README. Only set inside a job (an empty UV_NO_SYNC on the
+# login node makes uv error "expected a boolish value"). Override by pre-exporting before
+# sbatch, e.g. WANDB_MODE=offline / HF_HUB_OFFLINE=1 if the proxy is down.
 if [ -n "${SLURM_JOB_ID:-}" ]; then
-  # wandb: log offline, `wandb sync` from the login node afterwards.
-  export WANDB_MODE="${WANDB_MODE:-offline}"
-  # HF: a missing weight/dataset errors immediately instead of hanging on retries.
-  # Pre-download models AND datasets on the login node first.
-  export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
-  # uv: never sync in a job. `uv run` syncs by default, which tries to fetch wheel
-  # metadata (incl. the aarch64 vllm variant from tool.uv.environments) and dies on
-  # `tcp connect error`. The venv is already built on the login node — just use it.
+  export http_proxy="${http_proxy:-http://squid.tamia.ecpia.ca:3128}"
+  export https_proxy="${https_proxy:-http://squid.tamia.ecpia.ca:3128}"
+  export no_proxy="${no_proxy:-tamia.ecpia.ca}"
   export UV_NO_SYNC="${UV_NO_SYNC:-1}"
 fi
 

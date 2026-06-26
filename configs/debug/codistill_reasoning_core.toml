@@ -1,0 +1,57 @@
+# Staged student/teacher co-distillation on reasoning-core-env (DeepSeek-R1-Distill-Qwen-1.5B).
+#
+# Formally-verified symbolic reasoning (40 procedural task types: logic, math, planning,
+# graphs, code-exec, ...), filtered to difficulty levels 2-3 and capped at 512 train
+# problems (data-efficiency regime). Built by scripts/tamia/prep_reasoning_core.py; the
+# env loads it offline from the local parquet dir via its `dataset_name` arg.
+#
+# Each stage: (rl_steps) GRPO on student -> clone into teacher -> (rft_steps) SFT teacher
+# on the student's *correct* generations -> (opd_steps) distil student from teacher.
+# Reward is binary (score_answer==1 for correct), so correct_reward_threshold=0.8 == "fully correct".
+#
+# Smoke test: 10 stages. Launch on one h100:4 node with 2 infer + 2 train GPUs:
+#   CONFIG=configs/debug/codistill_reasoning_core.toml NUM_INFER_GPUS=2 NUM_TRAIN_GPUS=2 \
+#     sbatch scripts/tamia/codistill.sh
+max_steps = 10  # stages
+seq_len = 6144
+
+[model]
+name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+
+[trainer.model.ac]  # activation checkpointing — two models (student+teacher) in trainer memory
+
+[wandb]
+project = "reasoning-core-codistill"
+name = "codistill-reasoning-core-l2-3-smoke"
+
+[orchestrator]
+batch_size = 32
+group_size = 8
+
+[orchestrator.train.sampling]
+temperature = 0.6
+max_completion_tokens = 4096
+
+[[orchestrator.train.env]]
+id = "reasoning-core-env"
+args = { dataset_name = "/scratch/k/ksareen/datasets/reasoning_core_l2-3_n512", num_train_examples = 512, num_eval_examples = 128 }
+
+[trainer]
+rl_steps = 1
+rft_steps = 4
+opd_steps = 1
+correct_reward_threshold = 0.8
+
+[trainer.optim]  # student
+lr = 3e-6
+
+[trainer.teacher_optim]
+type = "adamw"
+lr = 1e-5
+
+[inference]
+
+# DeepSeek-R1 emits <think> reasoning; opt into DefaultRenderer with the think parser.
+[orchestrator.renderer]
+name = "default"
+reasoning_parser = "think"
