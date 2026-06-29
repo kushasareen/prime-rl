@@ -1,0 +1,52 @@
+# Codistill on reasoning-core-env with Qwen3-4B (bigger student than the 1.5B variant).
+#
+# Same setup as codistill_reasoning_core.toml (formally-verified symbolic reasoning,
+# levels 2-3, 512 problems, binary reward so correct_reward_threshold=0.8 == "fully
+# correct"), but a 4B student. codistill holds student+teacher BOTH in trainer memory
+# with two AdamW optimizers (~128 GB sharded for 4B), so this needs FSDP across several
+# trainer GPUs — run 1 infer + 3 train on an h100:4 node (2 train OOMs at ~68 GB/GPU):
+#   CONFIG=configs/debug/codistill_reasoning_core_qwen3_4b.toml \
+#     NUM_INFER_GPUS=1 NUM_TRAIN_GPUS=3 sbatch scripts/tamia/codistill.sh
+max_steps = 10  # stages
+seq_len = 6144
+
+[model]
+name = "Qwen/Qwen3-4B"
+
+[trainer.model.ac]  # activation checkpointing — two models in trainer memory
+
+[wandb]
+project = "reasoning-core-codistill"
+name = "codistill-reasoning-core-l2-3-qwen3-4b"
+
+[orchestrator]
+batch_size = 32
+group_size = 8
+
+[orchestrator.train.sampling]
+temperature = 0.6
+max_completion_tokens = 4096
+
+[[orchestrator.train.env]]
+id = "reasoning-core-env"
+args = { dataset_name = "/scratch/k/ksareen/datasets/reasoning_core_l2-3_n512", num_train_examples = 512, num_eval_examples = 128 }
+
+[trainer]
+rl_steps = 1
+rft_steps = 4
+opd_steps = 1
+correct_reward_threshold = 0.8
+
+[trainer.optim]  # student
+lr = 3e-6
+
+[trainer.teacher_optim]
+type = "adamw"
+lr = 1e-5
+
+[inference]
+
+# Qwen3-4B emits <think> reasoning; opt into DefaultRenderer with the think parser.
+[orchestrator.renderer]
+name = "default"
+reasoning_parser = "think"
