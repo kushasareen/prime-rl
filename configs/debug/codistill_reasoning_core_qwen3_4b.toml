@@ -8,7 +8,7 @@
 # during OPD. That plus seq_len=10240 (8k completions) fits 2 infer + 2 train on a100l:4:
 #   CONFIG=configs/debug/codistill_reasoning_core_qwen3_4b.toml \
 #     NUM_INFER_GPUS=2 NUM_TRAIN_GPUS=2 sbatch scripts/mila/codistill.sh
-max_steps = 10  # stages
+max_steps = 10000  # long run; matched to the RL baseline. Walltime caps it; resume via --ckpt.resume-step -1.
 seq_len = 10240  # 8192-tok completion + 2048-tok prompt budget (longer prompts drop; p99 ~2.5k)
 
 [model]
@@ -45,6 +45,8 @@ lr = 3e-6
 [trainer.teacher_optim]
 type = "adamw"
 lr = 1e-5
+
+[ckpt]  # enable student checkpoint/resume; interval/resume_step come from the CLI
 
 [inference]
 

@@ -29,12 +29,21 @@ export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${SCRATCH}/uv/python}"
 # Use uv's downloaded CPython, never the Gentoo-stack python (avoids the wheelhouse).
 export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
 
-# --- HF + framework caches on $SCRATCH ---
+# --- HF cache on $SCRATCH (large, persistent model weights) ---
 export HF_HOME="${HF_HOME:-${SCRATCH}/huggingface}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${SCRATCH}/cache}"
-export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${XDG_CACHE_HOME}/triton}"
-export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${XDG_CACHE_HOME}/torch_inductor}"
-export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${XDG_CACHE_HOME}/vllm}"
+
+# --- compile/autotune caches: node-local inside a job, else $SCRATCH ---
+# Triton/inductor/vLLM autotuning writes many tiny .json cache files. On the shared Lustre
+# scratch the parallel DP inference replicas + trainer race on them: one process reads an
+# autotune entry another is mid-write -> FileNotFoundError in sample_tokens, killing the
+# vLLM worker at the first /generate (seen on Mila's beegfs; Lustre is less prone but not
+# immune — matters for long unattended runs). $SLURM_TMPDIR is per-node and race-free. It's
+# tmpfs (RAM) on Tamia, but these caches are small (~hundreds of MB) and ephemeral.
+_COMPILE_CACHE_ROOT="${SLURM_TMPDIR:-$XDG_CACHE_HOME}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${_COMPILE_CACHE_ROOT}/triton}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${_COMPILE_CACHE_ROOT}/torch_inductor}"
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${_COMPILE_CACHE_ROOT}/vllm}"
 mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$HF_HOME" \
          "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$VLLM_CACHE_ROOT"
 
