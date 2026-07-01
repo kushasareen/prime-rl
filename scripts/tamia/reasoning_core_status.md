@@ -14,7 +14,7 @@ symbolic reasoning, 40 procedural task types), filtered to difficulty **levels 2
 
 - Config (1.5B): `configs/debug/codistill_reasoning_core.toml` — DeepSeek-R1-Distill-Qwen-1.5B, 2 infer + 2 train.
 - Config (4B): `configs/debug/codistill_reasoning_core_qwen3_4b.toml` — Qwen/Qwen3-4B, 1 infer + 3 train (4B×2 + 2 AdamW ≈ 128 GB sharded; 2 train OOMs).
-- Dataset prep: `scripts/tamia/prep_reasoning_core.py` → parquet at `$SCRATCH/datasets/reasoning_core_l2-3_n512`.
+- Dataset: `scripts/tamia/prep_reasoning_core.py` built the parquet, now published to the HF Hub as `kushasareen/reasoning-core-l2-3-n512` (configs point at that id, so it's portable across clusters).
 - Launch: `CONFIG=<cfg> NUM_INFER_GPUS=.. NUM_TRAIN_GPUS=.. sbatch scripts/tamia/codistill.sh`
 
 ## The bug (FIXED) — proxy swallowed localhost traffic
@@ -66,14 +66,36 @@ request still hits the proxy:** pin the inference base_url to IPv4, e.g.
   4-GPU allocations only). Est. starts keep slipping by days. Our account fairshare is
   depressed by heavy account-mate usage (not us). This is why validating here is slow.
 
-## Not yet validated / next steps
+## VALIDATED end-to-end on Mila (2026-07-01)
 
-- **The reasoning-core codistill run has never gotten past orchestrator setup** — both
-  prior attempts died on the proxy bug *before* Step 0. So still unconfirmed:
-  1. that the run trains end-to-end (GRPO → teacher RFT → OPD) on this env, and
-  2. the **base reward at Step 0** — i.e. whether levels 2–3 land in the low-but-nonzero
-     band we want (retune the level filter in `prep_reasoning_core.py` if it's ~0 or high).
-- Fastest path: validate on a cluster with quick allocations. The run is portable; only
-  `env.sh`'s proxy block is Tamia-specific (Mila compute nodes have direct internet, so
-  no proxy needed there).
-- Once Step 0 looks healthy, promote from the 10-stage smoke to a longer run.
+Ran the 1.5B smoke on Mila `short-unkillable` (a100l:4, 2 infer + 2 train) via
+`scripts/mila/codistill.sh`. Both open questions are now answered:
+
+1. **Trains end-to-end.** All three staged phases fire and log every stage, e.g.
+   `Stage 0 | Reward 0.4012 | Correct 40.8% | RFT NLL 0.0487 | OPD KL 0.0082->0.0082`
+   (GRPO reward, teacher RFT NLL, student OPD KL). Ran 3 stages clean, no crashes.
+2. **Step 0 base reward ≈ 0.34 (40.8% correct)** on levels 2–3 — squarely in the
+   low-but-nonzero band we wanted, so the `prep_reasoning_core.py` level filter is well
+   tuned. No retune needed.
+
+Two fixes were required to get there (both on `exp/codistill`):
+
+- **Env id** — configs said `id = "reasoning-core-env"`, which never auto-installs
+  (`get_env_ids_to_install` only installs ids containing `/`) and isn't pip-installed, so
+  `vf.load_environment` would fail. Corrected to the hub id
+  `id = "reasoning-core/reasoning-core-env"` (with `name = "reasoning-core-env"` to keep
+  metric keys flat). Dataset now the HF Hub id `kushasareen/reasoning-core-l2-3-n512`.
+- **Triton cache race** — vLLM's sampler autotune cache on shared beegfs
+  (`$SCRATCH/cache/triton`) raced across the two DP inference replicas: one reads a `.json`
+  another is mid-write → `FileNotFoundError` in `sample_tokens`, killing the vLLM worker at
+  the first `/generate`. Fixed in `scripts/mila/env.sh` by putting the compile/autotune
+  caches (Triton/inductor/vLLM) on node-local `$SLURM_TMPDIR` (HF weights stay on scratch).
+  Tamia's `env.sh` still points these at Lustre scratch — mirror this fix there if the same
+  ENOENT appears (Lustre is less prone than beegfs, but not immune).
+
+## Next steps
+
+- Promote from the 10-stage smoke to a longer run now that the pipeline is proven.
+- The 4B config (`codistill_reasoning_core_qwen3_4b.toml`) is unchanged in shape and got the
+  same env-id/dataset fixes, but hasn't been run yet — validate its 1 infer + 3 train memory
+  split before trusting it.
