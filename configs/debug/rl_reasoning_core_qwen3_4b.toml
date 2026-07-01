@@ -1,0 +1,48 @@
+# RL baseline for the reasoning-core co-distillation comparison (Qwen3-4B).
+#
+# Plain GRPO RL on reasoning-core-env, matched to codistill_reasoning_core_qwen3_4b.toml
+# (same model, env, dataset, seq_len, 8k completion budget, batch/group, temperature, LR,
+# renderer) so the ONLY variable vs the 1-4-1 codistill run is the teacher/RFT/OPD
+# machinery. Compared at matched stages (each stage/step = one rollout batch).
+#
+# Launch via scripts/mila/rl.sh (uv run rl), 2 infer + 2 train on an a100l:4 node — and
+# for a multi-day run use the chained-job wrapper so it survives the 3h wall-clock limit:
+#   LAUNCHER=scripts/mila/rl.sh CONFIG=configs/debug/rl_reasoning_core_qwen3_4b.toml \
+#     RUN_NAME=rl-rc-4b NUM_JOBS=2 CKPT_INTERVAL=25 NUM_INFER_GPUS=2 NUM_TRAIN_GPUS=2 \
+#     scripts/mila/chain.sh
+max_steps = 10000  # long run; chained 3h jobs resume via --ckpt.resume-step -1
+seq_len = 10240
+
+[model]
+name = "Qwen/Qwen3-4B"
+
+[trainer.model.ac]  # activation checkpointing (match the codistill trainer)
+
+[wandb]
+project = "reasoning-core-codistill"
+name = "rl-baseline-reasoning-core-l2-3-qwen3-4b"
+
+[orchestrator]
+batch_size = 32
+group_size = 8
+
+[orchestrator.train.sampling]
+temperature = 0.6
+max_completion_tokens = 8192
+
+[[orchestrator.train.env]]
+id = "reasoning-core/reasoning-core-env"
+name = "reasoning-core-env"  # keep metric/buffer keys flat (id carries the hub owner for auto-install)
+args = { dataset_name = "kushasareen/reasoning-core-l2-3-n512", num_train_examples = 512, num_eval_examples = 128 }
+
+[trainer.optim]
+lr = 3e-6
+
+[ckpt]  # enable checkpointing; interval/resume_step come from the chain wrapper (CLI)
+
+[inference]
+
+# Qwen3-4B emits <think> reasoning; opt into DefaultRenderer with the think parser.
+[orchestrator.renderer]
+name = "default"
+reasoning_parser = "think"
