@@ -1,11 +1,13 @@
 import prime_rl._compat  # noqa: F401 — patch ring_flash_attn compat before model imports
 
+import gc
 from datetime import timedelta
 
 import torch
 
 from prime_rl.configs.codistill import CoDistillTrainerConfig
 from prime_rl.trainer.codistill.clone import clone_into_teacher, weight_l2_distance
+from prime_rl.trainer.ckpt import setup_ckpt_managers
 from prime_rl.trainer.codistill.loop import (
     batch_reward_stats,
     correct_fraction,
@@ -27,7 +29,7 @@ from prime_rl.utils.config import cli
 from prime_rl.utils.logger import setup_logger
 from prime_rl.utils.monitor import setup_monitor
 from prime_rl.utils.process import set_proc_title
-from prime_rl.utils.utils import clean_exit
+from prime_rl.utils.utils import clean_exit, resolve_latest_ckpt_step
 
 
 def _assert_supported(config: CoDistillTrainerConfig) -> None:
@@ -59,8 +61,20 @@ def train(config: CoDistillTrainerConfig):
 
     parallel_dims = get_parallel_dims(config.model)
 
+    # Set up the checkpoint manager and decide whether to resume before model init, so the
+    # student can skip the redundant HF weight load when its weights come from a checkpoint.
+    # Only the student is checkpointed — the teacher is re-cloned from it every stage.
+    ckpt_manager, weight_ckpt_manager = setup_ckpt_managers(config.output_dir, config.ckpt, config.model.lora)
+    checkpoint_step = None
+    if config.ckpt and config.ckpt.resume_step is not None and ckpt_manager is not None:
+        checkpoint_step = (
+            resolve_latest_ckpt_step(ckpt_manager.ckpt_dir)
+            if config.ckpt.resume_step == -1
+            else config.ckpt.resume_step
+        )
+
     logger.info(f"Initializing student model ({config.model.name})")
-    student = setup_model(config.model, parallel_dims, False)
+    student = setup_model(config.model, parallel_dims, checkpoint_step is not None)
     logger.info(f"Initializing teacher model ({config.teacher_model.name})")
     teacher = setup_model(config.teacher_model, parallel_dims, False)
     tokenizer = setup_tokenizer(config.tokenizer)
@@ -88,6 +102,9 @@ def train(config: CoDistillTrainerConfig):
     )
 
     progress = Progress()
+    if checkpoint_step is not None:
+        ckpt_manager.load(checkpoint_step, student, [student_optimizer], student_scheduler, progress)
+        logger.info(f"Resuming co-distillation from checkpoint stage {checkpoint_step}")
     logger.info(f"Starting co-distillation loop (stages={config.max_steps or 'infinite'})")
 
     while config.max_steps is None or progress.step < config.max_steps:
@@ -143,6 +160,12 @@ def train(config: CoDistillTrainerConfig):
         metrics["codistill/teacher_rft_nll"] = rft_metrics["nll"]
         metrics["codistill/clone_dist_after_rft"] = weight_l2_distance(student, teacher)
 
+        # Teacher optimizer is done for this stage (rebuilt next stage after the re-clone);
+        # free its AdamW state now so it doesn't sit idle on-GPU through the logprob pass + OPD.
+        del teacher_optimizer
+        gc.collect()
+        torch.cuda.empty_cache()
+
         # Teacher is frozen during OPD — compute its logprobs once and cache.
         teacher.eval()
         with torch.no_grad():
@@ -180,6 +203,21 @@ def train(config: CoDistillTrainerConfig):
         monitor.log(metrics, step=stage)
 
         progress.step += 1
+
+        # Save the student on the configured interval (post-increment, so the saved
+        # progress.step is the next stage to run — resume continues cleanly from here).
+        if (
+            ckpt_manager is not None
+            and config.ckpt
+            and config.ckpt.interval
+            and progress.step % config.ckpt.interval == 0
+        ):
+            logger.info(f"Saving checkpoint at stage {progress.step}")
+            ckpt_manager.save(progress.step, student, [student_optimizer], student_scheduler, progress)
+            ckpt_manager.maybe_clean()
+            if weight_ckpt_manager is not None:
+                weight_ckpt_manager.save(progress.step, student, tokenizer)
+                weight_ckpt_manager.maybe_clean()
 
     # Broadcast the final student so the orchestrator can advance to the terminal
     # policy version, assemble its draining batch (step >= max_steps), and tear down
