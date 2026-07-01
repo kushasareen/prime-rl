@@ -31,6 +31,9 @@ export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
 
 # --- HF cache on $SCRATCH (large, persistent model weights) ---
 export HF_HOME="${HF_HOME:-${SCRATCH}/huggingface}"
+# reasoning-core-env's lexical_knowledge task scores via nltk (wordnet/omw); pre-download those
+# corpora here once on the login node (they must exist offline on compute nodes).
+export NLTK_DATA="${NLTK_DATA:-${SCRATCH}/nltk_data}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${SCRATCH}/cache}"
 
 # --- compile/autotune caches: node-local inside a job, else $SCRATCH ---

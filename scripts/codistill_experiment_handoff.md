@@ -14,7 +14,7 @@ Compare, on the same model / env / dataset, changing only the training algorithm
   `configs/debug/codistill_reasoning_core_qwen3_4b.toml` (`uv run codistill`).
 
 Both: **Qwen3-4B**, env `reasoning-core/reasoning-core-env`, dataset
-`kushasareen/reasoning-core-l2-3-n512` (512 train / 128 eval, difficulty levels 2–3),
+`kushasareen/reasoning-core-l2-3-n512` (495 train / 121 eval, difficulty levels 2–3),
 `seq_len=10240`, `max_completion_tokens=8192`, `batch_size=32`, `group_size=8`,
 `temperature=0.6`, student `lr=3e-6`, DefaultRenderer + `think` parser. **Compared at matched
 stages** (1 stage = 1 rollout batch). The 4B init sits ~44% correct on levels 2–3 (healthy
@@ -52,6 +52,26 @@ low-but-nonzero band). A 1.5B variant exists (`codistill_reasoning_core.toml`) f
    dataset → HF Hub id; `max_completion_tokens` 4096 → 8192 (truncation was 40–70% after step 0,
    now ~20%); `seq_len` → 10240 (8192 completion + 2048 prompt budget; prompts over that with a
    long completion are dropped by the packer — only ~1–3% of this dataset, p99 prompt ≈ 2.5k).
+
+## Reward scoring fix (important — do not skip on a fresh setup)
+
+`reasoning-core-env`'s `score_answer` silently mis-scored ~19% of rollouts (correct answers →
+reward 0) because scoring dependencies were missing and the verifiers rubric swallows the
+exception. Auditing gold answers per task found: `inflect` missing (set/count tasks),
+`nltk` wordnet/omw data missing (lexical_knowledge), and a reasoning_core task-resolver bug on
+`diff_patching`/`term_unification` (AssertionError — not fixable by installing). Fixes applied:
+
+- **`inflect`** added to `pyproject.toml` deps (the env fails to declare it). In the lock, so
+  the staged job venv has it before the runtime `prime env install`.
+- **nltk corpora** (`wordnet`, `omw-1.4`) pre-downloaded to `$SCRATCH/nltk_data`; `env.sh`
+  (both clusters) exports `NLTK_DATA`. On a fresh machine run once:
+  `uv run python -c "import nltk; nltk.download('wordnet'); nltk.download('omw-1.4')"`.
+- **`diff_patching` + `term_unification`** dropped from the dataset (re-pushed to the same HF
+  repo). New size 495 train / 121 eval.
+
+Verified: every remaining task now scores its gold answer 1.0 on both splits (0 broken / 0
+weird). Re-run the per-task audit (`score_answer(gold, info)` over one example per task) if the
+env version changes.
 
 ## How to run
 
