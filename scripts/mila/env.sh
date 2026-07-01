@@ -17,12 +17,21 @@ export SCRATCH="${SCRATCH:-/network/scratch/${USER:0:1}/${USER}}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${SCRATCH}/uv/cache}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${SCRATCH}/uv/envs}"
 
-# --- HF + framework caches on $SCRATCH ---
+# --- HF cache on $SCRATCH (large, persistent model weights) ---
 export HF_HOME="${HF_HOME:-${SCRATCH}/huggingface}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${SCRATCH}/cache}"
-export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${XDG_CACHE_HOME}/triton}"
-export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${XDG_CACHE_HOME}/torch_inductor}"
-export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${XDG_CACHE_HOME}/vllm}"
+
+# --- compile/autotune caches: node-local inside a job, else $SCRATCH ---
+# Triton/inductor/vLLM autotuning writes many tiny .json cache files. On beegfs (shared
+# scratch), the parallel DP inference replicas + the trainer race on them: one process
+# reads an autotune entry another is still writing and hits FileNotFoundError mid-generation
+# (`triton_..._0.json` in sample_tokens), which kills the vLLM worker at the first /generate.
+# Node-local $SLURM_TMPDIR (NVMe) is per-node and race-free. These caches are ephemeral
+# (rebuilt each job), so losing them at job end is fine — unlike HF weights above.
+_COMPILE_CACHE_ROOT="${SLURM_TMPDIR:-$XDG_CACHE_HOME}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${_COMPILE_CACHE_ROOT}/triton}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${_COMPILE_CACHE_ROOT}/torch_inductor}"
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${_COMPILE_CACHE_ROOT}/vllm}"
 mkdir -p "$HF_HOME" "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$VLLM_CACHE_ROOT"
 
 # --- torch.compile / inductor: compile in-process (no subprocess worker pool) ---
