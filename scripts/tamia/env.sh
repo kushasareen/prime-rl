@@ -61,7 +61,12 @@ mkdir -p "$WANDB_DIR"
 if [ -n "${SLURM_JOB_ID:-}" ]; then
   export http_proxy="${http_proxy:-http://squid.tamia.ecpia.ca:3128}"
   export https_proxy="${https_proxy:-http://squid.tamia.ecpia.ca:3128}"
-  export no_proxy="${no_proxy:-tamia.ecpia.ca}"
+  # CRITICAL: bypass the proxy for localhost — the orchestrator talks to its own vLLM
+  # server at http://localhost:8000. Without localhost/127.0.0.1 here, that internal
+  # request is routed through Squid, which returns an empty body -> JSONDecodeError in
+  # orchestrator setup (wait_for_ready). tamia.ecpia.ca covers node-hostname traffic.
+  export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,tamia.ecpia.ca}"
+  export NO_PROXY="${NO_PROXY:-$no_proxy}"
   export UV_NO_SYNC="${UV_NO_SYNC:-1}"
 fi
 
