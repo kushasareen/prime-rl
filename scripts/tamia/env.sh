@@ -65,7 +65,7 @@ if [ -n "${SLURM_JOB_ID:-}" ]; then
   # server at http://localhost:8000. Without localhost/127.0.0.1 here, that internal
   # request is routed through Squid, which returns an empty body -> JSONDecodeError in
   # orchestrator setup (wait_for_ready). tamia.ecpia.ca covers node-hostname traffic.
-  export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,tamia.ecpia.ca}"
+  export no_proxy="${no_proxy:-localhost,127.0.0.1,0.0.0.0,::1,tamia.ecpia.ca}"
   export NO_PROXY="${NO_PROXY:-$no_proxy}"
   export UV_NO_SYNC="${UV_NO_SYNC:-1}"
 fi
