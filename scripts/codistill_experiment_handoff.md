@@ -13,6 +13,10 @@ Compare, on the same model / env / dataset, changing only the training algorithm
   (on-policy-distillation) step on the student from the teacher.
   `configs/debug/codistill_reasoning_core_qwen3_4b.toml` (`uv run codistill`).
 
+Both configs run **held-out validation** every 25 steps (`[orchestrator.eval]`) on the
+dataset's 121-example test split (`env.get_eval_dataset`), so the RL-vs-codistill comparison
+has val curves — without an `[orchestrator.eval]` block, prime-rl logs no val at all.
+
 Both: **Qwen3-4B**, env `reasoning-core/reasoning-core-env`, dataset
 `kushasareen/reasoning-core-l2-3-n512` (495 train / 121 eval, difficulty levels 2–3),
 `seq_len=10240`, `max_completion_tokens=8192`, `batch_size=32`, `group_size=8`,

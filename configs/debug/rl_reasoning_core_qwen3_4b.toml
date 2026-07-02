@@ -35,6 +35,21 @@ id = "reasoning-core/reasoning-core-env"
 name = "reasoning-core-env"  # keep metric/buffer keys flat (id carries the hub owner for auto-install)
 args = { dataset_name = "kushasareen/reasoning-core-l2-3-n512", num_train_examples = 512, num_eval_examples = 128 }
 
+# Held-out validation on the dataset's test split (env.get_eval_dataset) every `interval` steps.
+[orchestrator.eval]
+interval = 25
+
+[orchestrator.eval.sampling]
+temperature = 0.6
+max_completion_tokens = 8192
+
+[[orchestrator.eval.env]]
+id = "reasoning-core/reasoning-core-env"
+name = "reasoning-core-env"
+args = { dataset_name = "kushasareen/reasoning-core-l2-3-n512", num_train_examples = 512, num_eval_examples = 128 }
+num_examples = -1  # all eval examples (121)
+group_size = 1
+
 [trainer.optim]
 lr = 3e-6
 
