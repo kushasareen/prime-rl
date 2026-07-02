@@ -62,6 +62,7 @@ type = "adamw"
 lr = 1e-5
 
 [ckpt]  # enable student checkpoint/resume; interval/resume_step come from the CLI
+keep_last = 1  # keep only the latest checkpoint on disk (wipe older) — avoids filling scratch
 
 [inference]
 

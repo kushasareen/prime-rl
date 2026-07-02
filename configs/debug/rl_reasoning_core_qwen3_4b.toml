@@ -53,7 +53,8 @@ group_size = 1
 [trainer.optim]
 lr = 3e-6
 
-[ckpt]  # enable checkpointing; interval/resume_step come from the chain wrapper (CLI)
+[ckpt]  # interval/resume_step come from the chain wrapper (CLI)
+keep_last = 1  # keep only the latest checkpoint on disk (wipe older) — avoids filling scratch
 
 [inference]
 
