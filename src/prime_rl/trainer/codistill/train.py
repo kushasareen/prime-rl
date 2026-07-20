@@ -1,6 +1,8 @@
 import prime_rl._compat  # noqa: F401 — patch ring_flash_attn compat before model imports
 
 import gc
+import random
+from collections import deque
 from datetime import timedelta
 
 import torch
@@ -107,6 +109,10 @@ def train(config: CoDistillTrainerConfig):
     if checkpoint_step is not None:
         ckpt_manager.load(checkpoint_step, student, [student_optimizer], student_scheduler, progress)
         logger.info(f"Resuming co-distillation from checkpoint stage {checkpoint_step}")
+    # Optional RFT replay buffer: correct SFT micro-batches from the last N stages, so RFT
+    # samples from a larger/steadier pool of correct trajectories than one stage's batch.
+    rft_replay = deque(maxlen=config.rft_replay_buffer_size) if config.rft_replay_buffer_size > 0 else None
+
     logger.info(f"Starting co-distillation loop (stages={config.max_steps or 'infinite'})")
 
     while config.max_steps is None or progress.step < config.max_steps:
@@ -143,9 +149,9 @@ def train(config: CoDistillTrainerConfig):
         if config.rl_steps:
             metrics["codistill/rl_loss"] = rl_metrics["loss"]
 
-        # No rollouts cleared the reward threshold -> no correct data to RFT the teacher on;
-        # skip the teacher RFT + student OPD for this stage.
-        if frac_correct == 0.0:
+        # No correct data anywhere (this stage AND the replay buffer) -> nothing to RFT the
+        # teacher on; skip the teacher RFT + student OPD for this stage.
+        if frac_correct == 0.0 and (rft_replay is None or len(rft_replay) == 0):
             metrics["codistill/lr"] = student_optimizer.param_groups[0]["lr"]
             metrics["step"] = stage
             logger.warning(
@@ -163,12 +169,21 @@ def train(config: CoDistillTrainerConfig):
             config.teacher_optim, list(teacher.named_parameters()), parallel_dims, lora=False, cpu_offload=False
         )
 
-        # (E) RFT: SFT the teacher on the student's CORRECT generations.
+        # (E) RFT: SFT the teacher on CORRECT generations — this stage's, optionally sampled
+        # from the replay buffer of recent stages.
         teacher.train()
         rft_micro_batches = correct_sft_micro_batches(micro_batches, threshold)
-        for _ in range(config.rft_steps):
+        if rft_replay is not None and frac_correct > 0.0:
+            rft_replay.append(rft_micro_batches)
+        for rft_step in range(config.rft_steps):
+            if rft_replay is not None and len(rft_replay) > 0:
+                # Rank-synchronized sample: `stage` is identical across ranks, so every rank
+                # draws the same buffer index (and thus its matching shard) — no FSDP mismatch.
+                rft_batch = rft_replay[random.Random(stage * 100_000 + rft_step).randrange(len(rft_replay))]
+            else:
+                rft_batch = rft_micro_batches
             rft_metrics = forward_backward(
-                teacher, rft_micro_batches, loss_fns, "sft", parallel_dims, max_norm=config.teacher_optim.max_norm
+                teacher, rft_batch, loss_fns, "sft", parallel_dims, max_norm=config.teacher_optim.max_norm
             )
             teacher_optimizer.step()
             teacher_optimizer.zero_grad()

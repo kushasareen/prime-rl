@@ -30,6 +30,9 @@ class CoDistillTrainerConfig(TrainerConfig):
     opd_steps: int = Field(1, ge=1)
     """D: on-policy-distillation steps on the student from the teacher."""
 
+    rft_replay_buffer_size: int = Field(0, ge=0)
+    """If > 0, keep the correct RFT micro-batches from the last N stages in a replay buffer and sample each RFT step from it (instead of only the current stage's correct generations). 0 disables — RFT uses the current stage only."""
+
     correct_reward_threshold: float | None = None
     """Reward at/above which a sample is "correct" for RFT. None -> the stage batch's max reward."""
 
