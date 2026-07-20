@@ -21,7 +21,7 @@ project = "reasoning-core-codistill"
 name = "codistill-reasoning-core-l2-3-qwen3-4b"
 
 [orchestrator]
-batch_size = 32
+batch_size = 256  # 32 problems x group_size 8
 group_size = 8
 
 [orchestrator.train.sampling]
