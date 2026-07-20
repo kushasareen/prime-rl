@@ -3,9 +3,9 @@
 # Same as codistill_reasoning_core_qwen3_4b.toml except the stage recipe:
 #   rl_steps = 0    -> no GRPO step on the student; the student is updated ONLY by OPD
 #   rft_steps = 20  -> many teacher SFT steps per stage (was 4) to move the teacher further
-#   rft_replay_buffer_size = 32  -> RFT samples correct batches from the last 32 STAGES
+#   rft_replay_buffer_size = 16  -> RFT samples correct batches from the last 16 STAGES
 #                                   (a stage = one batch = 32 trajectories, masked to correct;
-#                                   so 32 stages ~= 1k trajectories). Set to 0 for the no-buffer
+#                                   so 16 stages ~= 500 trajectories). Set to 0 for the no-buffer
 #                                   ablation (RFT uses only the current stage's correct subset).
 # Launch on a100l:4, 2 infer + 2 train:
 #   CONFIG=configs/debug/codistill_reasoning_core_qwen3_4b_rft.toml \
@@ -21,7 +21,7 @@ name = "Qwen/Qwen3-4B"
 
 [wandb]
 project = "reasoning-core-codistill"
-name = "codistill-rc-l2-3-qwen3-4b-rft20-rl0-buf32"
+name = "codistill-rc-l2-3-qwen3-4b-rft20-rl0-buf16"
 
 [orchestrator]
 batch_size = 32
@@ -55,7 +55,7 @@ group_size = 1
 rl_steps = 0                  # no GRPO on the student — pure clone -> RFT -> OPD
 rft_steps = 20                # teacher SFT steps per stage (was 4)
 opd_steps = 1
-rft_replay_buffer_size = 32   # sample RFT from the last 32 stages (~1k trajectories); 0 = no buffer
+rft_replay_buffer_size = 16   # sample RFT from the last 16 stages (~500 trajectories); 0 = no buffer
 correct_reward_threshold = 0.8
 
 [trainer.optim]  # student
