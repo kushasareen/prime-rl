@@ -33,6 +33,13 @@ class CoDistillTrainerConfig(TrainerConfig):
     correct_reward_threshold: float | None = None
     """Reward at/above which a sample is "correct" for RFT. None -> the stage batch's max reward."""
 
+    @property
+    def max_student_optimizer_steps(self) -> int | None:
+        """Total student optimizer updates across all CoDistill stages (rl + opd steps per stage)."""
+        if self.max_steps is None:
+            return None
+        return self.max_steps * (self.rl_steps + self.opd_steps)
+
     @model_validator(mode="after")
     def default_teacher_model(self):
         if self.teacher_model is None:

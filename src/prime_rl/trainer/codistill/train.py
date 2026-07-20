@@ -83,7 +83,9 @@ def train(config: CoDistillTrainerConfig):
     student_optimizer = setup_optimizer(
         config.optim, list(student.named_parameters()), parallel_dims, lora=False, cpu_offload=False
     )
-    student_scheduler = setup_scheduler(student_optimizer, config.scheduler, config.max_steps, config.optim.lr)
+    student_scheduler = setup_scheduler(
+        student_optimizer, config.scheduler, config.max_student_optimizer_steps, config.optim.lr
+    )
 
     if config.data.fake:  # unreachable (guarded above) — kept explicit for the reader
         weight_broadcast = None
@@ -140,6 +142,19 @@ def train(config: CoDistillTrainerConfig):
             student_scheduler.step()
         if config.rl_steps:
             metrics["codistill/rl_loss"] = rl_metrics["loss"]
+
+        # No rollouts cleared the reward threshold -> no correct data to RFT the teacher on;
+        # skip the teacher RFT + student OPD for this stage.
+        if frac_correct == 0.0:
+            metrics["codistill/lr"] = student_optimizer.param_groups[0]["lr"]
+            metrics["step"] = stage
+            logger.warning(
+                f"Stage {stage} has no rollouts at or above reward threshold {threshold:.4f}; "
+                "skipping teacher RFT and student OPD."
+            )
+            monitor.log(metrics, step=stage)
+            progress.step += 1
+            continue
 
         # Clone the (updated) student into the teacher, in memory; reset teacher optimizer.
         clone_into_teacher(student, teacher)

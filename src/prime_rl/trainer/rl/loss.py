@@ -165,54 +165,47 @@ def default_loss_fn(inputs: LossInputs, loss_config: DefaultLossConfig) -> LossO
     return LossOutputs(loss=loss, metrics=metrics)
 
 
+# CISPO importance-weight clip bounds (MiniMax-M1, arXiv:2506.13585). Lower bound disabled
+# (0.0 is a no-op — the IS weight exp(.) is always > 0); upper bound is loose (ScaleRL found
+# 4/5/8 ~equivalent). Tune _CISPO_CLIP_HIGH here.
+_CISPO_CLIP_LOW = 0.0
+_CISPO_CLIP_HIGH = 4.0
+
+
 def opd_loss_fn(inputs: LossInputs) -> LossOutputs:
     """
-    On-policy distillation loss: the default DPPO+KL math with the tau knobs
-    hardcoded to drop the reward signal and use the teacher KL as the
-    per-token policy-gradient signal.
+    On-policy distillation loss: REINFORCE with the teacher KL as the per-token signal
+    (reward dropped). Trust region is CISPO-style importance-weight clipping (MiniMax-M1);
+    the DPPO mask and the KL term are disabled.
     """
     trainer_logprobs = inputs.trainer_logprobs
     inference_logprobs = inputs.inference_logprobs
     teacher_logprobs = inputs.teacher_logprobs
-    advantages = inputs.advantages
     loss_mask = inputs.loss_mask
 
     if teacher_logprobs is None:
         raise ValueError("opd_loss_fn requires teacher_logprobs - configure a teacher for opd mode.")
 
-    log_importance_ratio, importance_ratio, mismatch_kl = compute_importance_ratio_and_mismatch_kl(
+    _, importance_ratio, mismatch_kl = compute_importance_ratio_and_mismatch_kl(
         trainer_logprobs, inference_logprobs
     )
 
-    probs_diff = torch.exp(trainer_logprobs) - torch.exp(inference_logprobs)
-    dppo_invalid_mask_high = probs_diff > 0.2
-    dppo_invalid_mask_low = probs_diff < -0.2
-    positive_advantages = advantages > 0
-    negative_advantages = advantages < 0
-    dppo_invalid_mask = torch.where(positive_advantages, dppo_invalid_mask_high, dppo_invalid_mask_low)
-
-    is_masked = dppo_invalid_mask
-    is_masked_high = positive_advantages & dppo_invalid_mask_high
-    is_masked_low = negative_advantages & dppo_invalid_mask_low
-    drop_mask = loss_mask & is_masked
-    keep_mask = loss_mask & ~is_masked
-
     teacher_kl = teacher_logprobs - trainer_logprobs
-    advantages = 0.0 * advantages + 1.0 * teacher_kl.detach()
+    advantages = teacher_kl.detach()
 
-    pg_loss = keep_mask * advantages * importance_ratio
-    kl_loss = loss_mask * log_importance_ratio**2
-    loss = (-pg_loss + 1e-3 * kl_loss).sum()
+    # CISPO (MiniMax-M1): instead of DPPO masking (which zeroes the gradient on out-of-band
+    # tokens), clip + stop-grad the importance weight and route the gradient through
+    # log pi_theta, so every trainable token keeps contributing while its update magnitude
+    # is bounded. One-sided clip (no lower bound; loose upper bound).
+    is_weight = importance_ratio.clamp(_CISPO_CLIP_LOW, _CISPO_CLIP_HIGH).detach()
+    pg_loss = loss_mask * advantages * is_weight * trainer_logprobs
+    # KL trust-region term disabled (kl_tau = 0) for now.
+    loss = (-pg_loss).sum()
 
     metrics = {
-        "masked_mismatch_kl": _safe_mean(mismatch_kl, loss_mask & is_masked),
-        "unmasked_mismatch_kl": _safe_mean(mismatch_kl, keep_mask),
-        "is_masked": _safe_mean(is_masked, loss_mask),
-        "is_masked_low": _safe_mean(is_masked_low, loss_mask),
-        "is_masked_high": _safe_mean(is_masked_high, loss_mask),
-        "masked_advantage_positive": _safe_mean(positive_advantages, drop_mask),
-        "masked_advantage_negative": _safe_mean(negative_advantages, drop_mask),
+        "unmasked_mismatch_kl": _safe_mean(mismatch_kl, loss_mask),
         "teacher_kl": _safe_mean(teacher_kl, loss_mask),
+        "cispo_clip_frac": _safe_mean((importance_ratio > _CISPO_CLIP_HIGH).float(), loss_mask),
     }
 
     return LossOutputs(loss=loss, metrics=metrics)
