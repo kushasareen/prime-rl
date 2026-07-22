@@ -81,7 +81,13 @@ from prime_rl.utils.client import init_nccl_broadcast, setup_inference_pool
 from prime_rl.utils.heartbeat import Heartbeat
 from prime_rl.utils.logger import format_time, get_logger, setup_logger
 from prime_rl.utils.monitor import setup_monitor
-from prime_rl.utils.pathing import get_ckpt_dir, get_log_dir, get_rollout_dir, get_step_path
+from prime_rl.utils.pathing import (
+    get_ckpt_dir,
+    get_log_dir,
+    get_rollout_dir,
+    get_step_path,
+    resolve_latest_shared_ckpt_step,
+)
 from prime_rl.utils.usage_reporter import UsageReporter
 from prime_rl.utils.utils import (
     clean_exit,
@@ -290,18 +296,23 @@ class Orchestrator:
 
         if config.ckpt is not None and config.ckpt.resume_step is not None and self.ckpt_manager is not None:
             if config.ckpt.resume_step == -1:
-                self.resume_step = resolve_latest_ckpt_step(self.ckpt_manager.ckpt_dir)
-                # The orchestrator can run ahead of a slow trainer and checkpoint a step whose
-                # student weights the trainer never saved. On resume the trainer only re-broadcasts
-                # weights for the step IT resumes from (its own DCP latest), so clamp the
-                # orchestrator to the trainer's latest checkpoint or the weight-wait below times out.
-                trainer_latest = resolve_latest_ckpt_step(get_ckpt_dir(config.output_dir))
-                if self.resume_step is not None and trainer_latest is not None and trainer_latest < self.resume_step:
+                # The orchestrator ships rollouts ahead of the slow codistill trainer and
+                # checkpoints independently (in OUT/run_default/checkpoints) from the trainer
+                # (OUT/checkpoints). On resume the trainer only re-broadcasts weights for the
+                # step IT resumes from, so both must resume from their latest COMMON step or
+                # the weight-wait below times out. config.output_dir is OUT/run_default, so the
+                # trainer's dir is its parent.
+                trainer_ckpt_dir = get_ckpt_dir(config.output_dir.parent)
+                if trainer_ckpt_dir.exists():
+                    self.resume_step = resolve_latest_shared_ckpt_step(trainer_ckpt_dir, self.ckpt_manager.ckpt_dir)
+                else:  # standalone orchestrator with no sibling trainer dir
+                    self.resume_step = resolve_latest_ckpt_step(self.ckpt_manager.ckpt_dir)
+                own_latest = resolve_latest_ckpt_step(self.ckpt_manager.ckpt_dir)
+                if self.resume_step is not None and own_latest is not None and self.resume_step != own_latest:
                     get_logger().warning(
-                        f"Orchestrator checkpoint (step {self.resume_step}) is ahead of the trainer "
-                        f"(step {trainer_latest}); clamping resume to {trainer_latest}."
+                        f"Orchestrator latest checkpoint is step {own_latest} but the latest step "
+                        f"shared with the trainer is {self.resume_step}; resuming both from {self.resume_step}."
                     )
-                    self.resume_step = trainer_latest
             else:
                 self.resume_step = config.ckpt.resume_step
 

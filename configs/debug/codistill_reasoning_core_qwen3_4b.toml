@@ -62,7 +62,7 @@ type = "adamw"
 lr = 1e-5
 
 [ckpt]  # enable student checkpoint/resume; interval/resume_step come from the CLI
-keep_last = 1  # keep only the latest checkpoint on disk (wipe older) — avoids filling scratch
+keep_last = 2  # retain {latest, latest-interval} so an async trainer/orchestrator resume always shares a common step
 
 [inference]
 

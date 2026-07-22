@@ -66,7 +66,7 @@ type = "adamw"
 lr = 1e-5
 
 [ckpt]  # student checkpoint/resume; interval/resume_step from the CLI
-keep_last = 1
+keep_last = 2  # retain {latest, latest-interval} so an async trainer/orchestrator resume always shares a common step
 
 [inference]
 

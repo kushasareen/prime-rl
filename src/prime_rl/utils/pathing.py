@@ -110,6 +110,19 @@ def resolve_latest_ckpt_step(ckpt_dir: Path) -> int | None:
     return latest_step
 
 
+def resolve_latest_shared_ckpt_step(trainer_ckpt_dir: Path, orchestrator_ckpt_dir: Path) -> int | None:
+    """Latest step for which BOTH the trainer and orchestrator have a checkpoint.
+
+    The orchestrator ships rollouts ahead of the (slow) codistill trainer, so on an async
+    resume the two can hold checkpoints at different steps; resuming from a step only one
+    side has desyncs the weight broadcast (the orchestrator waits for weights the trainer
+    never re-broadcasts). Resuming both from their latest common step realigns them.
+    Returns None if they share no step.
+    """
+    common = set(get_all_ckpt_steps(trainer_ckpt_dir)) & set(get_all_ckpt_steps(orchestrator_ckpt_dir))
+    return max(common) if common else None
+
+
 def has_checkpoints(output_dir: Path) -> bool:
     """Check if the output directory contains any checkpoints."""
     ckpt_dir = get_ckpt_dir(output_dir)

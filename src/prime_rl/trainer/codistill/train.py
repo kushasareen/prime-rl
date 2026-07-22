@@ -31,6 +31,7 @@ from prime_rl.utils.config import cli
 from prime_rl.utils.logger import setup_logger
 from prime_rl.utils.monitor import setup_monitor
 from prime_rl.utils.process import set_proc_title
+from prime_rl.utils.pathing import get_ckpt_dir, resolve_latest_shared_ckpt_step
 from prime_rl.utils.utils import clean_exit, resolve_latest_ckpt_step
 
 
@@ -69,11 +70,17 @@ def train(config: CoDistillTrainerConfig):
     ckpt_manager, weight_ckpt_manager = setup_ckpt_managers(config.output_dir, config.ckpt, config.model.lora)
     checkpoint_step = None
     if config.ckpt and config.ckpt.resume_step is not None and ckpt_manager is not None:
-        checkpoint_step = (
-            resolve_latest_ckpt_step(ckpt_manager.ckpt_dir)
-            if config.ckpt.resume_step == -1
-            else config.ckpt.resume_step
-        )
+        if config.ckpt.resume_step == -1:
+            # Resume from the latest step shared with the orchestrator so the two stay aligned
+            # on an async resume (see the mirror logic in orchestrator.py). The trainer's
+            # output_dir is OUT; the orchestrator checkpoints under OUT/run_default.
+            orch_ckpt_dir = get_ckpt_dir(config.output_dir / "run_default")
+            if orch_ckpt_dir.exists():
+                checkpoint_step = resolve_latest_shared_ckpt_step(ckpt_manager.ckpt_dir, orch_ckpt_dir)
+            else:
+                checkpoint_step = resolve_latest_ckpt_step(ckpt_manager.ckpt_dir)
+        else:
+            checkpoint_step = config.ckpt.resume_step
 
     logger.info(f"Initializing student model ({config.model.name})")
     student = setup_model(config.model, parallel_dims, checkpoint_step is not None)
