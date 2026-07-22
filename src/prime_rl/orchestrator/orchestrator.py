@@ -81,7 +81,7 @@ from prime_rl.utils.client import init_nccl_broadcast, setup_inference_pool
 from prime_rl.utils.heartbeat import Heartbeat
 from prime_rl.utils.logger import format_time, get_logger, setup_logger
 from prime_rl.utils.monitor import setup_monitor
-from prime_rl.utils.pathing import get_log_dir, get_rollout_dir, get_step_path
+from prime_rl.utils.pathing import get_ckpt_dir, get_log_dir, get_rollout_dir, get_step_path
 from prime_rl.utils.usage_reporter import UsageReporter
 from prime_rl.utils.utils import (
     clean_exit,
@@ -291,6 +291,17 @@ class Orchestrator:
         if config.ckpt is not None and config.ckpt.resume_step is not None and self.ckpt_manager is not None:
             if config.ckpt.resume_step == -1:
                 self.resume_step = resolve_latest_ckpt_step(self.ckpt_manager.ckpt_dir)
+                # The orchestrator can run ahead of a slow trainer and checkpoint a step whose
+                # student weights the trainer never saved. On resume the trainer only re-broadcasts
+                # weights for the step IT resumes from (its own DCP latest), so clamp the
+                # orchestrator to the trainer's latest checkpoint or the weight-wait below times out.
+                trainer_latest = resolve_latest_ckpt_step(get_ckpt_dir(config.output_dir))
+                if self.resume_step is not None and trainer_latest is not None and trainer_latest < self.resume_step:
+                    get_logger().warning(
+                        f"Orchestrator checkpoint (step {self.resume_step}) is ahead of the trainer "
+                        f"(step {trainer_latest}); clamping resume to {trainer_latest}."
+                    )
+                    self.resume_step = trainer_latest
             else:
                 self.resume_step = config.ckpt.resume_step
 
