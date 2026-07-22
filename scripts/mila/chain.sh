@@ -35,6 +35,10 @@ CKPT_INTERVAL="${CKPT_INTERVAL:-25}"
 
 # Forward launcher-facing env via sbatch's default --export=ALL.
 export CONFIG RUN_NAME
+# Stable wandb run id per RUN_NAME so every window in the chain RESUMES one wandb run.
+# Without this the rl entrypoint mints a fresh uuid each job -> a new run per window
+# (fragmented metrics). Deterministic from RUN_NAME; override by pre-exporting.
+export WANDB_SHARED_RUN_ID="${WANDB_SHARED_RUN_ID:-$(printf '%s' "$RUN_NAME" | md5sum | cut -c1-32)}"
 [ -n "${NUM_INFER_GPUS:-}" ] && export NUM_INFER_GPUS
 [ -n "${NUM_TRAIN_GPUS:-}" ] && export NUM_TRAIN_GPUS
 [ -n "${OUTPUT_DIR:-}" ] && export OUTPUT_DIR
