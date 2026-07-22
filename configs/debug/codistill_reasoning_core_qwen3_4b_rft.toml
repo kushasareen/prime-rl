@@ -68,6 +68,9 @@ lr = 1e-5
 [ckpt]  # student checkpoint/resume; interval/resume_step from the CLI
 keep_last = 2  # retain {latest, latest-interval} so an async trainer/orchestrator resume always shares a common step
 
+[orchestrator.ckpt]  # on resume, wait for the trainer to (re)broadcast the resumed step's weights instead of failing immediately
+wait_for_weights_timeout = 1200
+
 [inference]
 
 # Qwen3-4B emits <think> reasoning; opt into DefaultRenderer with the think parser.

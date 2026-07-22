@@ -129,7 +129,11 @@ def train(config: CoDistillTrainerConfig):
         if weight_broadcast is not None and stage > 0:
             weight_broadcast.broadcast_weights(student, step=stage)
             if config.weight_broadcast.type == "filesystem":
-                weight_broadcast.maybe_clean(None)
+                # Preserve the checkpoint-interval broadcasts on disk (like rl/train.py) so a
+                # resume finds the resumed step's weights immediately instead of racing the
+                # trainer's re-broadcast.
+                interval_to_keep = config.ckpt and config.ckpt.interval
+                weight_broadcast.maybe_clean(interval_to_keep)
 
         # One batch of student rollouts for this whole stage.
         dataloader.wait_for_batch()
