@@ -1,0 +1,79 @@
+# Codistill 4B variant: no student RL step, moderate RFT depth, RFT replay buffer.
+#
+# Same as codistill_reasoning_core_qwen3_4b.toml except the stage recipe:
+#   rl_steps = 0    -> no GRPO step on the student; the student is updated ONLY by OPD
+#   rft_steps = 8   -> teacher SFT steps per stage; midpoint between the rft4 and rft20 arms
+#   rft_replay_buffer_size = 16  -> RFT samples correct batches from the last 16 STAGES
+#                                   (a stage = one batch = 32 trajectories, masked to correct;
+#                                   so 16 stages ~= 500 trajectories). Set to 0 for the no-buffer
+#                                   ablation (RFT uses only the current stage's correct subset).
+# rl_steps=0 arms so far: rft4 (no buffer), THIS rft8 (buf16), rft20 (buf16).
+# Launch on a100l:4, 1 infer + 3 train (trainer is the bottleneck):
+#   CONFIG=configs/debug/codistill_reasoning_core_qwen3_4b_rft8.toml \
+#     NUM_INFER_GPUS=1 NUM_TRAIN_GPUS=3 sbatch scripts/mila/codistill.sh
+max_steps = 10000  # long run; walltime caps it, resume via --ckpt.resume-step -1.
+seq_len = 10240  # 8192-tok completion + 2048-tok prompt budget
+
+[model]
+name = "Qwen/Qwen3-4B"
+
+[trainer.model.ac]  # activation checkpointing — two models in trainer memory
+
+[wandb]
+project = "reasoning-core-codistill"
+name = "codistill-rc-l2-3-qwen3-4b-rft8-rl0-buf16"
+
+[orchestrator]
+batch_size = 256  # 32 problems x group_size 8
+group_size = 8
+
+[orchestrator.train.sampling]
+temperature = 0.6
+max_completion_tokens = 8192
+
+[[orchestrator.train.env]]
+id = "reasoning-core/reasoning-core-env"
+name = "reasoning-core-env"
+args = { dataset_name = "kushasareen/reasoning-core-l2-3-n512", num_train_examples = 512, num_eval_examples = 128 }
+
+# Held-out validation on the dataset's test split every `interval` stages.
+[orchestrator.eval]
+interval = 25
+
+[orchestrator.eval.sampling]
+temperature = 0.6
+max_completion_tokens = 8192
+
+[[orchestrator.eval.env]]
+id = "reasoning-core/reasoning-core-env"
+name = "reasoning-core-env"
+args = { dataset_name = "kushasareen/reasoning-core-l2-3-n512", num_train_examples = 512, num_eval_examples = 128 }
+num_examples = -1  # all eval examples (121)
+group_size = 1
+
+[trainer]
+rl_steps = 0                  # no GRPO on the student — pure clone -> RFT -> OPD
+rft_steps = 8                 # teacher SFT steps per stage (between the rft4 and rft20 arms)
+opd_steps = 1
+rft_replay_buffer_size = 16   # sample RFT from the last 16 stages (~500 trajectories); 0 = no buffer
+correct_reward_threshold = 0.8
+
+[trainer.optim]  # student
+lr = 3e-6
+
+[trainer.teacher_optim]
+type = "adamw"
+lr = 1e-5
+
+[ckpt]  # student checkpoint/resume; interval/resume_step from the CLI
+keep_last = 2  # retain {latest, latest-interval} so an async trainer/orchestrator resume always shares a common step
+
+[orchestrator.ckpt]  # on resume, wait for the trainer to (re)broadcast the resumed step's weights instead of failing immediately
+wait_for_weights_timeout = 1200
+
+[inference]
+
+# Qwen3-4B emits <think> reasoning; opt into DefaultRenderer with the think parser.
+[orchestrator.renderer]
+name = "default"
+reasoning_parser = "think"
